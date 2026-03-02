@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BikeSafe Omni | 全能單車領航系統</title>
+    <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+    <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet">
+    <style>
+        :root { --danger: #ff4757; --safe: #2ed573; --warning: #ffa502; --dark: #2f3542; }
+        body { margin: 0; font-family: 'PingFang TC', sans-serif; overflow: hidden; }
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+
+        /* 頂部全能儀表板 (整合氣象與導航步訊) */
+        .omni-hud {
+            position: absolute; top: 10px; left: 10px; right: 10px;
+            background: rgba(47, 53, 66, 0.9); color: white; padding: 15px;
+            border-radius: 15px; z-index: 10; display: flex; flex-direction: column;
+            backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1);
+        }
+        .hud-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+        .wind-badge { padding: 3px 10px; border-radius: 20px; font-weight: bold; font-size: 0.9em; }
+
+        /* 右側懸浮操作區 */
+        .action-dock {
+            position: absolute; right: 15px; top: 120px; display: flex;
+            flex-direction: column; gap: 12px; z-index: 10;
+        }
+        .btn-fab {
+            width: 55px; height: 55px; border-radius: 50%; border: none;
+            background: white; box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+        }
+
+        /* 底部導航指引 */
+        .nav-footer {
+            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+            width: 90%; background: white; padding: 15px; border-radius: 20px;
+            box-shadow: 0 -5px 20px rgba(0,0,0,0.1); z-index: 10; display: none;
+        }
+    </style>
+</head>
+<body>
+
+<div class="omni-hud">
+    <div class="hud-row">
+        <div id="weather">🌡️ 26°C | 🌫️ PM2.5: 優</div>
+        <div id="wind-indicator" class="wind-badge" style="background: var(--safe);">🟢 順風 (2級)</div>
+    </div>
+    <div class="hud-row" style="font-size: 0.85em; opacity: 0.8;">
+        <div id="gps-status">📡 GPS 定位中...</div>
+        <div id="points-display">🏆 騎士積分: 1,250</div>
+    </div>
+</div>
+
+<div class="action-dock">
+    <button class="btn-fab" onclick="startNav()" title="開始導航">🚀</button>
+    <button class="btn-fab" style="color: var(--danger);" onclick="quickReport()" title="回報路障">⚠️</button>
+    <button class="btn-fab" style="color: #1e90ff;" onclick="findAmenity('shop')" title="找車店">🔧</button>
+    <button class="btn-fab" style="color: #ff6348;" onclick="findAmenity('food')" title="找餐廳">🍴</button>
+</div>
+
+<div id="map"></div>
+
+<script>
+    // 1. 初始化地圖與基礎設定
+    mapboxgl.accessToken = 'YOUR_MAPBOX_TOKEN'; 
+    const map = new mapboxgl.Map({
+        container: 'map',
+        style: 'mapbox://styles/mapbox/navigation-day-v1',
+        center: [120.3, 22.6], // 初始中心
+        zoom: 15,
+        pitch: 45 // 3D 視角有利於導航
+    });
+
+    let userMarker = new mapboxgl.Marker({ color: '#1e90ff' });
+    let currentPoints = 1250;
+
+    // 2. GPS 即時追蹤模組
+    function initGPS() {
+        if (navigator.geolocation) {
+            navigator.geolocation.watchPosition(position => {
+                const { longitude, latitude, heading } = position.coords;
+                const pos = [longitude, latitude];
+                
+                userMarker.setLngLat(pos).addTo(map);
+                map.easeTo({ center: pos, bearing: heading || 0 });
+                document.getElementById('gps-status').innerText = `📡 定位準確 (H: ${Math.round(heading || 0)}°)`;
+                
+                // 連動檢查附近危險與風向
+                checkSafety(latitude, longitude);
+                calculateWind(heading);
+            }, err => console.error(err), { enableHighAccuracy: true });
+        }
+    }
+
+    // 3. 風級紅綠燈邏輯 (全能計算)
+    function calculateWind(riderHeading) {
+        const windDir = 45; // 假設今日東北風
+        const diff = Math.abs((riderHeading || 0) - windDir);
+        const el = document.getElementById('wind-indicator');
+        
+        if (diff < 45) { el.style.background = 'var(--safe)'; el.innerText = '🟢 順風 (1級)'; }
+        else if (diff > 135) { el.style.background = 'var(--danger)'; el.innerText = '🔴 逆風 (3級)'; }
+        else { el.style.background = 'var(--warning)'; el.innerText = '🟡 側風 (2級)'; }
+    }
+
+    // 4. 積分制路障回報 (防亂報邏輯)
+    function quickReport() {
+        const type = prompt("發現什麼危險？\n1.坑洞 2.施工 3.違停 4.車禍現場");
+        if (!type) return;
+
+        // 模擬後端驗證：檢查距離與歷史信用
+        alert("GPS 已核實位置... 信用評等優良！");
+        currentPoints += 15;
+        document.getElementById('points-display').innerText = `🏆 騎士積分: ${currentPoints}`;
+        
+        // 在地圖上即時標記
+        const loc = map.getCenter();
+        new mapboxgl.Marker({ color: 'red' })
+            .setLngLat(loc)
+            .setPopup(new mapboxgl.Popup().setHTML(`⚠️ 新回報: ${type}<br>驗證獎勵 +15`))
+            .addTo(map);
+    }
+
+    // 5. 生活機能模組 (餐廳、車店)
+    function findAmenity(type) {
+        alert(`正在搜尋附近 2km 內的單車友善${type === 'shop' ? '維修店' : '餐廳'}...`);
+        // 這裡串接導航權重，標示出綠色友善路線
+    }
+
+    map.on('load', () => {
+        initGPS();
+        // 預載入車禍熱點圖層 (熱力圖)
+        // 預載入官方自行車道 (綠色線段)
+    });
+</script>
+</body>
+</html>
